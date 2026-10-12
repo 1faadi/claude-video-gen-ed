@@ -528,7 +528,6 @@ def write_checkpoint(
     # append them to the project-level decision log file, then write the
     # reference back into relevant artifacts so downstream consumers can find it.
     if "decision_log" in artifacts and isinstance(artifacts["decision_log"], dict):
-        _merge_decision_log(pipeline_dir, project_id, artifacts["decision_log"])
         log_ref = str(_decision_log_path(pipeline_dir, project_id))
 
         # Write decision_log_ref into proposal_packet and render_report
@@ -545,6 +544,10 @@ def write_checkpoint(
                     plan_or_top["decision_log_ref"] = log_ref
 
     validate_checkpoint(checkpoint)
+
+    # Reject invalid stage/artifact payloads before persisting their decisions.
+    if "decision_log" in artifacts and isinstance(artifacts["decision_log"], dict):
+        _merge_decision_log(pipeline_dir, project_id, artifacts["decision_log"])
 
     path = _checkpoint_path(pipeline_dir, project_id, stage)
     path.parent.mkdir(parents=True, exist_ok=True)
