@@ -4,6 +4,7 @@ import {
   STAGE_ICONS, el, fmtAgo, fmtClock, fmtDuration, fmtMoney,
   getJSON, mediaURL, subscribe, thumbURL, waveBars,
 } from "/ui/lib.js";
+import { renderEditor } from "/ui/editor.js";
 
 const rawProjectPath = location.pathname.split("/p/")[1] || "";
 const projectId = decodeURIComponent(rawProjectPath);
@@ -867,6 +868,22 @@ function renderFoundMedia(s) {
     grid);
 }
 
+function renderCarousels(s) {
+  const items = s.media.carousels || [];
+  if (!items.length) return null;
+  const wrap = el("div", {});
+  for (const c of items) {
+    const strip = el("div", { class: "carousel-strip" });
+    c.slides.forEach((p, i) => strip.append(el("a", { class: "thumb carousel-slide", href: mediaURL(s.project_id, p), target: "_blank", title: `slide ${i + 1}` },
+      el("img", { src: thumbURL(s.project_id, p, 320), loading: "lazy", alt: `slide ${i + 1}` }))));
+    wrap.append(el("div", { class: "carousel-head" }, el("b", {}, c.name), el("span", { class: "chip" }, `${c.slides.length} slides`),
+      c.pdf ? el("a", { class: "st-btn ghost", href: mediaURL(s.project_id, c.pdf), download: "" }, "⬇ PDF for LinkedIn") : null), strip);
+  }
+  return el("div", {},
+    el("div", { class: "section-title" }, "Carousels", el("span", { class: "meta" }, "projects/<id>/carousel/")),
+    wrap);
+}
+
 function renderNoState(s) {
   if (s.has_pipeline_state) return null;
   return el("div", { class: "notice", style: "border-color:#2b2b33;background:var(--surface-2);color:var(--text-3)" },
@@ -1069,34 +1086,72 @@ function render() {
   const noState = renderNoState(s);
   if (noState) app.append(noState);
 
+  if (!replay) renderEditor(s);  // paints into the persistent #editor container below #app
+
+  const view = currentView(s);
+  const sections = {
+    review: [renderApprovalReview(s), renderScriptCard(s)],
+    story: [renderStoryboard(s), renderFoundMedia(s)],
+    output: [renderRenders(s), renderCarousels(s)],
+    log: [el("div", { class: "log-grid" }, renderDecisions(s), renderActivity(s))],
+  };
+  if (!sections.log[0].childNodes.length) sections.log = [];
+  app.append(renderViewTabs(s, view));
   const main = el("div", { class: "main-col" });
-  const approvalReview = renderApprovalReview(s);
-  if (approvalReview) main.append(approvalReview);
-  const script = renderScriptCard(s);
-  if (script) main.append(script);
-  const aside = el("aside", {});
-  const decisions = renderDecisions(s);
-  const activity = renderActivity(s);
-  if (decisions) aside.append(decisions);
-  if (activity) aside.append(activity);
-
-  // Media sections live INSIDE the main column so a tall decisions rail
-  // never pushes them below the fold — the column flows beside the rail.
-  const storyboard = renderStoryboard(s);
-  const found = renderFoundMedia(s);
-  const renders = renderRenders(s);
-
-  if (approvalReview || script || decisions || activity) {
-    for (const section of [storyboard, found, renders]) {
-      if (section) main.append(section);
-    }
-    const hasAside = Boolean(decisions || activity);
-    app.append(el("div", { class: `board${hasAside ? "" : " solo"}` }, main, hasAside ? aside : null));
-  } else {
-    for (const section of [storyboard, found, renders]) {
-      if (section) app.append(section);
-    }
+  for (const section of sections[view]) if (section) main.append(section);
+  const hasEditor = view === "output" && !replay && Boolean(s.storyboard && s.storyboard.scenes.length);
+  if (!main.childNodes.length && !hasEditor) {
+    main.append(el("p", { class: "hint" }, VIEWS.find((v) => v.id === view).empty));
   }
+  app.append(el("div", { class: "board solo" }, main));
+  editorRoot.style.display = view === "output" && !replay ? "" : "none";
+}
+
+// ---------------------------------------------------------------------------
+// view tabs — the board is grouped into four categories
+// ---------------------------------------------------------------------------
+
+const editorRoot = document.getElementById("editor");
+const VIEW_KEY = `backlot.view.${projectId}`;
+const VIEWS = [
+  { id: "review", label: "Review", empty: "Nothing to review yet — the script and approval gates appear here." },
+  { id: "story", label: "Storyboard", empty: "No scene plan yet — the storyboard appears once scenes are planned." },
+  { id: "output", label: "Output", empty: "Nothing rendered yet — renders, carousels and the cutting room appear here." },
+  { id: "log", label: "Log", empty: "No decisions or tool activity recorded yet." },
+];
+let selectedView = localStorage.getItem(VIEW_KEY);
+
+function currentView(s) {
+  if (selectedView && VIEWS.some((v) => v.id === selectedView)) return selectedView;
+  if (s.stages.some((x) => x.status === "awaiting_human")) return "review";
+  if (s.storyboard) return "story";
+  if (s.media.renders.length || (s.media.carousels || []).length) return "output";
+  return "review";
+}
+
+function viewBadge(s, id) {
+  if (id === "review" && s.stages.some((x) => x.status === "awaiting_human")) return "◈";
+  if (id === "story" && s.storyboard) return String(s.storyboard.scenes.length);
+  if (id === "output") {
+    const n = s.media.renders.length + (s.media.carousels || []).length;
+    return n ? String(n) : null;
+  }
+  if (id === "log") {
+    const n = ((s.artifacts.decision_log || {}).decisions || []).length + (s.events || []).length;
+    return n ? String(n) : null;
+  }
+  return null;
+}
+
+function renderViewTabs(s, view) {
+  return el("div", { class: "view-tabs", role: "tablist" }, VIEWS.map((v) => {
+    const badge = viewBadge(s, v.id);
+    return el("button", {
+      class: `cr-tab${view === v.id ? " active" : ""}`, type: "button", role: "tab",
+      "aria-selected": view === v.id ? "true" : "false",
+      onclick: () => { selectedView = v.id; localStorage.setItem(VIEW_KEY, v.id); render(); },
+    }, v.label, badge ? el("span", { class: "view-badge" }, badge) : null);
+  }));
 }
 
 // Defensive normalization (F-02): the server contract guarantees these
@@ -1112,6 +1167,7 @@ function normalize(s) {
   s.media.renders = Array.isArray(s.media.renders) ? s.media.renders : [];
   s.media.snapshots = Array.isArray(s.media.snapshots) ? s.media.snapshots : [];
   s.media.music = Array.isArray(s.media.music) ? s.media.music : [];
+  s.media.carousels = Array.isArray(s.media.carousels) ? s.media.carousels : [];
   s.events = Array.isArray(s.events) ? s.events : [];
   if (s.storyboard && Array.isArray(s.storyboard.scenes)) {
     for (const c of s.storyboard.scenes) {
@@ -1139,4 +1195,5 @@ refresh().catch((err) => {
 // ?static=1 disables the live feed (screenshots, static exports).
 if (!new URLSearchParams(location.search).has("static")) {
   subscribe(`/api/project/${encodeURIComponent(projectId)}/events`, () => refresh().catch(console.error));
+  import("/ui/agent.js").then((m) => m.mountAgentDock(projectId)).catch(console.error);
 }

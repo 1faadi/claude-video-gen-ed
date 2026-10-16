@@ -530,8 +530,22 @@ def _scan_media(project_dir: Path) -> dict[str, list[dict]]:
                 if f.suffix.lower() in MEDIA_IMAGE_EXT and f.is_file():
                     snapshots.append({"path": _rel(project_dir, f)})
 
+    carousels: list[dict] = []
+    carousel_root = project_dir / "carousel"
+    if carousel_root.is_dir():
+        for d in sorted(carousel_root.iterdir()):
+            if not d.is_dir():
+                continue
+            slides = [_rel(project_dir, f) for f in sorted(d.iterdir())
+                      if f.suffix.lower() in {".png", ".jpg", ".jpeg"} and f.is_file()]
+            pdfs = [_rel(project_dir, f) for f in sorted(d.glob("*.pdf"))]
+            if slides:
+                carousels.append({"name": d.name, "slides": slides,
+                                  "pdf": pdfs[0] if pdfs else None, "mtime": d.stat().st_mtime})
+    carousels.sort(key=lambda c: c["mtime"], reverse=True)
+
     renders.sort(key=lambda r: r.get("mtime", 0), reverse=True)
-    return {"renders": renders, "snapshots": snapshots, "music": music}
+    return {"renders": renders, "snapshots": snapshots, "music": music, "carousels": carousels}
 
 
 def _find_poster(project_dir: Path, state: dict) -> Optional[str]:

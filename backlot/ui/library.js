@@ -88,4 +88,5 @@ async function render() {
 render().catch(console.error);
 if (!new URLSearchParams(location.search).has("static")) {
   subscribe("/api/library/events", () => render().catch(console.error));
+  import("/ui/agent.js").then((m) => m.mountAgentDock("_library")).catch(console.error);
 }

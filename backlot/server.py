@@ -18,6 +18,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from backlot import agent as agent_bridge
+from backlot import studio
 from backlot.state import PROJECTS_DIR, REPO_ROOT, list_projects, load_board_state, summarize_project
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
@@ -160,6 +162,8 @@ async def _lifespan(app: FastAPI):
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        # Editors (HyperFrames/Remotion Studio) are detached and outlive the
+        # board on purpose: a board restart must not kill a user's open editor.
 
 
 def create_app() -> FastAPI:
@@ -239,6 +243,129 @@ def create_app() -> FastAPI:
             "X-Accel-Buffering": "no",
         })
 
+    # ---- Agent bridge (Claude Code via the user's own login + limits) ---
+
+    def _scope(project_id: str) -> str:
+        if project_id != agent_bridge.LIBRARY_ID:
+            _safe_project_dir(project_id)
+            agent_bridge.adopt_library_session(project_id)
+        return project_id
+
+    @app.get("/api/agent/{project_id}/status")
+    async def agent_status(project_id: str) -> dict:
+        return agent_bridge.status(_scope(project_id))
+
+    @app.get("/api/agent/{project_id}/transcript")
+    async def agent_transcript(project_id: str) -> list:
+        return agent_bridge.read_transcript(_scope(project_id))
+
+    @app.post("/api/agent/{project_id}/send")
+    async def agent_send(project_id: str, request: Request) -> dict:
+        body = await request.json()
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=400, detail="empty prompt")
+        try:
+            await agent_bridge.send(_scope(project_id), prompt)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        return {"ok": True}
+
+    @app.post("/api/agent/{project_id}/stop")
+    async def agent_stop(project_id: str) -> dict:
+        run = agent_bridge.RUNS.get(_scope(project_id))
+        if run:
+            run.stop()
+        return {"ok": True, "stopped": bool(run)}
+
+    @app.post("/api/agent/{project_id}/reset")
+    async def agent_reset(project_id: str) -> dict:
+        scope = _scope(project_id)
+        if scope in agent_bridge.RUNS:
+            raise HTTPException(status_code=409, detail="stop the run first")
+        agent_bridge.reset_session(scope)
+        return {"ok": True}
+
+    @app.get("/api/agent/{project_id}/stream")
+    async def agent_stream(project_id: str, request: Request) -> StreamingResponse:
+        scope = _scope(project_id)
+
+        async def stream():
+            q: asyncio.Queue = asyncio.Queue(maxsize=256)
+            agent_bridge.LISTENERS.setdefault(scope, set()).add(q)
+            run = agent_bridge.RUNS.get(scope)
+            if run:
+                run.subscribers.add(q)
+            yield _sse({"role": "hello", "running": bool(run)})
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        return
+                    try:
+                        entry = await asyncio.wait_for(q.get(), timeout=SSE_HEARTBEAT_SECONDS)
+                    except asyncio.TimeoutError:
+                        yield _sse({"role": "heartbeat", "running": scope in agent_bridge.RUNS})
+                        continue
+                    yield _sse(entry)
+            finally:
+                agent_bridge.LISTENERS.get(scope, set()).discard(q)
+                for r in agent_bridge.RUNS.values():
+                    r.subscribers.discard(q)
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        })
+
+    # ---- Visual editor (HyperFrames Studio / Remotion Studio) ----------
+
+    @app.get("/api/project/{project_id}/editor")
+    async def editor_status(project_id: str) -> dict:
+        project_dir = _safe_project_dir(project_id)
+        info = await asyncio.to_thread(studio.composition_info, project_dir)
+        return {"composition": info, **studio.status(project_id)}
+
+    @app.post("/api/project/{project_id}/editor")
+    async def editor_start(project_id: str) -> dict:
+        project_dir = _safe_project_dir(project_id)
+        try:
+            return await asyncio.to_thread(studio.start, project_id, project_dir)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+    @app.delete("/api/project/{project_id}/editor")
+    async def editor_stop(project_id: str) -> dict:
+        _safe_project_dir(project_id)
+        return {"stopped": await asyncio.to_thread(studio.stop, project_id)}
+
+    # ---- Composition source edits (the ONE place the board writes into
+    # projects/: a user-initiated, exact-match text replacement in the
+    # composition source — e.g. retitling a caption from the canvas) --------
+
+    _SOURCE_EXT = {".html", ".css", ".js", ".json", ".tsx", ".ts"}
+
+    @app.post("/api/project/{project_id}/source")
+    async def source_replace(project_id: str, request: Request) -> dict:
+        project_dir = _safe_project_dir(project_id)
+        body = await request.json()
+        rel = str(body.get("path") or "")
+        target = (project_dir / rel).resolve()
+        try:
+            target.relative_to(project_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="path escapes project")
+        if target.suffix.lower() not in _SOURCE_EXT or not target.is_file():
+            raise HTTPException(status_code=400, detail="not an editable source file")
+        old, new = str(body.get("old") or ""), str(body.get("new") or "")
+        if not old or old == new:
+            raise HTTPException(status_code=400, detail="nothing to replace")
+        text = await asyncio.to_thread(target.read_text, "utf-8")
+        n = text.count(old)
+        if n != 1:
+            raise HTTPException(status_code=409, detail=f"text occurs {n} times in {rel}; must be unique — ask the agent instead")
+        await asyncio.to_thread(target.write_text, text.replace(old, new, 1), "utf-8")
+        return {"ok": True, "path": rel}
+
     # ---- Thumbnails (downscaled, cached on disk) ------------------------
 
     @app.get("/thumb/{project_id}/{file_path:path}")
@@ -279,15 +406,15 @@ def create_app() -> FastAPI:
 
     @app.get("/p/{project_id}")
     async def board_page(project_id: str) -> HTMLResponse:
-        return _ui_html("board.html", ("board.css", "board.js"))
+        return _ui_html("board.html", ("board.css", "board.js", "agent.js"))
 
     @app.get("/p/{project_path:path}")
     async def board_page_path(project_path: str) -> HTMLResponse:
-        return _ui_html("board.html", ("board.css", "board.js"))
+        return _ui_html("board.html", ("board.css", "board.js", "agent.js"))
 
     @app.get("/")
     async def library_page() -> HTMLResponse:
-        return _ui_html("index.html", ("board.css", "library.js"))
+        return _ui_html("index.html", ("board.css", "library.js", "agent.js"))
 
     if UI_DIR.is_dir():
         app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")

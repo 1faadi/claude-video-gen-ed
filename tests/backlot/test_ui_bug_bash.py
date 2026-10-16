@@ -41,6 +41,8 @@ def _complete_predecessors(root, project_id: str, pipeline_type: str, stage: str
             artifact = sample_artifact(artifact_name)
             if artifact_name == "edit_decisions":
                 artifact["render_runtime"] = "ffmpeg"
+            if artifact_name == "render_report":
+                artifact["metadata"] = {"render_qa": {"passed": True, "report_path": "renders/review/render_qa/render_qa.json"}}
             artifacts = {artifact_name: artifact}
         else:
             artifacts = {}

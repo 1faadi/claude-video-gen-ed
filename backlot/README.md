@@ -11,6 +11,28 @@ python -m backlot open                # library view (all projects)
 python -m backlot serve --port 4750   # run the server in the foreground
 ```
 
+## Agent dock — drive Claude Code from the board
+
+Every page has a **✦ Agent** panel (bottom right). Type what you want —
+"make a 60s explainer about X", "make a LinkedIn carousel on this project's
+theme", "approve the script" — and the board runs `claude -p` in the repo
+root with your **own Claude Code login and plan limits** (no API key, same
+5h/7d windows you see in the terminal; the panel shows the usage meter).
+
+- One conversation per project, resumed with `--resume` so context carries
+  across prompts. **New chat** forgets it. Transcripts: `.backlot/chat/`.
+- Headless permissions: edits auto-accepted, allow-listed tools run
+  (`python`, `ffmpeg`, `npx`, file I/O…), anything else is denied, never
+  prompted. Widen `DEFAULT_ALLOWED_TOOLS` in `backlot/agent.py` if needed.
+- Approval gates still hold: the agent ends its turn with the question;
+  your next message answers it.
+- Quick chips prefill prompts for carousel / image / video / resume.
+- Runs on **Opus** by default (`--model opus`). Override with
+  `BACKLOT_AGENT_MODEL=<alias|model-id>` before starting the server.
+
+Carousels land in `projects/<id>/carousel/<slug>/` (PNG slides + PDF for
+LinkedIn) and show up on the board with a download button.
+
 ## How it stays live
 
 No agent involvement. A `watchfiles` watcher on `projects/` publishes change
