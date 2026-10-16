@@ -1,84 +1,16 @@
-﻿# OpenMontage â€" Skill Index
+# OpenMontage — Skill Index
 
 > For the full agent onboarding guide, see [`AGENT_GUIDE.md`](../AGENT_GUIDE.md) in the project root.
 
 This file lists all available Layer 2 skills and documents the 3-layer knowledge architecture.
 
-## Knowledge Architecture
+## How skills are organised
 
-```
-Layer 1: tools/tool_registry.py          "What tools exist and what they can do"
-         tools/base_tool.py               Each tool declares: capabilities, tier, status,
-                                          dependencies, cost, and agent_skills[]
-
-         â†" agent_skills[] points to â†"
-
-Layer 2: skills/                          "How OpenMontage uses these tools"
-         Project-specific conventions:     Pipeline integration, artifact mappings,
-         {core,creative,meta,pipelines}/   enhancement chain order, quality checklists
-
-         â†" references underlying tech in â†"
-
-Layer 3: .agents/skills/                  "How the technology itself works"
-         Generic API knowledge from        Correct import paths, code patterns,
-         skills.sh (47 installed skills)   constraints, parameters â€" tech-agnostic
-```
-
-**How the agent uses this:**
-1. The orchestrator queries Layer 1 (`tool_registry.support_envelope()`) to see what's available
-2. Each tool's `agent_skills[]` field names the Layer 3 skills it relies on
-3. Layer 2 skills (this directory) teach the agent OpenMontage-specific conventions
-4. Layer 3 skills (`.agents/skills/`) provide generic API knowledge, loaded on-demand
-
-## Capability Families & Tool Discovery
-
-Every tool declares a `capability` (what it does) and a `provider` (who/what powers it). The registry groups tools by capability so agents can discover all options for a given task.
-
-### Selector / Provider Pattern
-
-For capability families with multiple providers (TTS, video generation), the architecture uses:
-- **Selector tool** (`tts_selector`, `video_selector`, `image_selector`) — routes to the best available provider based on requirements, API key availability, and cost. Selectors auto-discover providers from the registry. Agents should default to selectors when the user hasn't specified a provider.
-- **Provider tools** — call a specific provider directly. Agents use these when the user explicitly requests a provider or when the selector's routing isn't appropriate.
-
-### Capability Family Reference
-
-**Do not maintain a hardcoded tool list.** The registry is the single source of truth. Query it at runtime:
-
-```bash
-python -c "from tools.tool_registry import registry; import json; registry.discover(); print(json.dumps(registry.capability_catalog(), indent=2))"
-```
-
-Key capability families to look for in the output:
-
-| Capability | Selector | Discovery |
-|---|---|---|
-| `tts` | `tts_selector` | Auto-discovers all `capability="tts"` tools |
-| `video_generation` | `video_selector` | Auto-discovers all `capability="video_generation"` tools |
-| `image_generation` | `image_selector` | Auto-discovers all `capability="image_generation"` tools |
-| `audio_processing` | — | FFmpeg-based local tools |
-| `enhancement` | — | Mixed providers |
-| `analysis` | — | Mixed providers |
-| `character_animation` | — | Local character specs, SVG rigs, pose libraries, action timelines, previews, and QA |
-| `3d_world_generation` | — | Local semantic terrain, procedural scattering, explicit landmarks, diagnostics, and HyperFrames/Three.js fly-through workspaces |
-| `3d_asset_acquisition` | — | Rights-safe local GLTF/GLB catalogs and provenance |
-| `3d_asset_generation` | — | Atlas/fal textured mesh generation and reconstruction for unique scene assets |
-| `3d_world_rendering` | — | Blender assembly and production rendering of detailed worlds |
-| `graphics` | — | Local rendering tools |
-| `music_library` | — | Discovers user-provided local tracks |
-| `music_search` | — | Discovers royalty-free search/download providers |
-| `music_generation` | — | Discovers paid/local generation providers |
-| `subtitle` | — | Pure Python |
-| `avatar` | — | Local GPU models |
-| `video_post` | — | FFmpeg-based local tools |
-
-### Adding New Tools
-
-1. Place the tool in the correct capability folder (or create a new one under `tools/`)
-2. Set `capability` and `provider` in the class definition
-3. If joining a multi-provider family, the existing selector discovers it automatically
-4. Attach relevant Layer 2 and Layer 3 skills via `agent_skills[]`
-5. The registry discovers tools automatically — no manual registration needed
-6. **No other files need updating** — selectors, manifests, and instructions all derive from the registry
+Three layers: `tools/` (what exists, queried via the registry), `skills/` (this
+directory: how OpenMontage uses it), `.agents/skills/` (vendor knowledge, reached
+through each tool's `agent_skills[]`). Full description: `PROJECT_CONTEXT.md`
+and `docs/agent-guide/layers.md`. Tool discovery is always the registry
+(`registry.capability_catalog()`), never a hardcoded list.
 
 ## Core Skills
 
@@ -102,30 +34,21 @@ Key capability families to look for in the output:
 | Data Visualization | `creative/data-visualization.md` | Chart type selection, animation, label placement | `d3-viz`, `remotion-best-practices` |
 | Video Stitching | `creative/video-stitching.md` | Multi-clip assembly, AI clip chaining, spatial composition | `ffmpeg`, `video-toolkit` |
 | Video Gen Prompting | `creative/video-gen-prompting.md` | Universal video generation prompt vocabulary; **canonical 5-aspect spec** (Subject / Motion / Scene / Spatial / Camera); ~200 cinematography primitives | `ai-video-gen`, `ltx2`, `create-video` |
-| â†³ Seedance Prompting | `creative/prompting/seedance-prompting.md` | **Preferred premium default.** Seedance 2.0 8-component structure, multi-shot, lip-sync, reference-to-video | `seedance-2-0`, `ai-video-gen` |
-| â†³ Grok Prompting | `creative/prompting/grok-prompting.md` | Grok image/video prompting, edit flows, reference-image video | `grok-media` |
-| â†³ Sora Prompting | `creative/prompting/sora-prompting.md` | Sora 2 structured template, advanced fields | `ai-video-gen` |
-| â†³ VEO Prompting | `creative/prompting/veo-prompting.md` | VEO 3.1 14-component structure, art movements | `ai-video-gen` |
-| â†³ LTX Prompting | `creative/prompting/ltx-prompting.md` | LTX-2 6-element structure, audio prompting | `ltx2` |
-| â†³ HunyuanVideo Prompting | `creative/prompting/hunyuan-prompting.md` | HunyuanVideo formula, I2V best practices | â€" |
-| Storytelling | `creative/storytelling.md` | Narrative structure, hooks, pacing, Mayer's principles | â€" |
+| ↳ Seedance Prompting | `creative/prompting/seedance-prompting.md` | **Preferred premium default.** Seedance 2.0 8-component structure, multi-shot, lip-sync, reference-to-video | `seedance-2-0`, `ai-video-gen` |
+| ↳ Grok Prompting | `creative/prompting/grok-prompting.md` | Grok image/video prompting, edit flows, reference-image video | `grok-media` |
+| ↳ Sora Prompting | `creative/prompting/sora-prompting.md` | Sora 2 structured template, advanced fields | `ai-video-gen` |
+| ↳ VEO Prompting | `creative/prompting/veo-prompting.md` | VEO 3.1 14-component structure, art movements | `ai-video-gen` |
+| ↳ LTX Prompting | `creative/prompting/ltx-prompting.md` | LTX-2 6-element structure, audio prompting | `ltx2` |
+| ↳ HunyuanVideo Prompting | `creative/prompting/hunyuan-prompting.md` | HunyuanVideo formula, I2V best practices | — |
+| Storytelling | `creative/storytelling.md` | Narrative structure, hooks, pacing, Mayer's principles | — |
 | Sound Design | `creative/sound-design.md` | Audio ducking, LUFS targets, SFX timing, AI TTS mixing | `elevenlabs` |
-| Typography | `creative/typography.md` | Font selection, text sizing, safe zones, caption styling | â€" |
-| ManimCE Usage | `creative/manim-usage.md` | Scene composition, animation timing, color usage | `manimce-best-practices` |
+| Typography | `creative/typography.md` | Font selection, text sizing, safe zones, caption styling | — |
 | Image Gen Usage | `creative/image-gen-usage.md` | Prompt consistency, hero reference, batch strategy | `flux-best-practices`, `bfl-api` |
 | Image Provider Usage | `creative/image-provider-usage.md` | Provider selection (FLUX/Grok/OpenAI/Recraft/stock), cost-quality tradeoffs | `flux-best-practices`, `bfl-api`, `grok-media` |
 | 3D World Generation | `creative/3d-world-generation.md` | Semantic world planning, asset sourcing/generation, Blender assembly, and fidelity review | `3d-asset-generation`, `threejs-world-generation` |
 | B-Roll Planning | `creative/broll-planning.md` | Stock vs. generated decision, query construction, footage evaluation | — |
 | Stock Sourcing Usage | `creative/stock-sourcing-usage.md` | Pexels/Pixabay usage, parameters, licensing, integration | — |
-| Scene Detect Usage | `creative/scene-detect-usage.md` | Threshold tuning, algorithm selection, content presets | â€" |
-| Diagram Gen Usage | `creative/diagram-gen-usage.md` | Complexity limits, progressive building, themes | `beautiful-mermaid` |
 | Music Gen Usage | `creative/music-gen-usage.md` | BPM selection, prompt engineering, duration matching | `music`, `elevenlabs` |
-| Background Removal | `creative/bg-remove-usage.md` | Model selection, alpha matting, compositing workflows | â€" |
-| Upscaling | `creative/upscale-usage.md` | Scale factor, model selection, face-aware upscaling | â€" |
-| Face Restoration | `creative/face-restore-usage.md` | CodeFormer/GFPGAN selection, fidelity tuning, vs face_enhance | â€" |
-| Lip Sync | `creative/lip-sync-usage.md` | Wav2Lip model selection, dubbing workflows, input requirements | `faceswap` |
-| Talking Head Gen | `creative/talking-head-gen-usage.md` | SadTalker/MuseTalk, photo-to-video, expression tuning | `avatar-video` |
-| Video Understanding | `creative/video-understand-usage.md` | Visual QA, quality gating, scene classification | `video-understand` |
 
 ## Pipeline Type Skills
 
@@ -133,8 +56,8 @@ Pipeline type skills provide production guidance for specific video formats, ind
 
 | Skill | File | When to Use |
 |-------|------|-------------|
-| Short-Form | `creative/short-form.md` | TikTok, Reels, Shorts â€" vertical 9:16, under 60s |
-| Long-Form | `creative/long-form.md` | YouTube 10+ min â€" chapters, retention, end screens |
+| Short-Form | `creative/short-form.md` | TikTok, Reels, Shorts — vertical 9:16, under 60s |
+| Long-Form | `creative/long-form.md` | YouTube 10+ min — chapters, retention, end screens |
 | Screen Recording | `creative/screen-recording.md` | Code walkthroughs, tutorials, software demos |
 | Animation Pipeline | `creative/animation-pipeline.md` | Motion graphics, easing, transitions, composition |
 | 3D World Generation | `creative/3d-world-generation.md` | Continuous Three.js terrain worlds with semantic regions, explicit blockout/production tiers, licensed GLTF/PBR assets, diagnostics, and deterministic camera paths |
@@ -287,6 +210,7 @@ Cross-cutting skills that apply to all pipelines:
 | Skill | File | Purpose |
 |-------|------|---------|
 | Onboarding | `meta/onboarding.md` | First-interaction greeting, capability discovery, starter prompts |
+| LinkedIn Carousel | `meta/linkedin-carousel.md` | On-brand static carousel (PDF + PNG slides) via `carousel_render`; no pipeline stages |
 | Reviewer | `meta/reviewer.md` | Self-review protocol after every stage |
 | Checkpoint Protocol | `meta/checkpoint-protocol.md` | When/how to checkpoint and request human approval |
 | Skill Creator | `meta/skill-creator.md` | Dynamically create new skills during pipeline runs |

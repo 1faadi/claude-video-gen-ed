@@ -323,3 +323,14 @@ Put dialogue in quotation marks: `Character says: "Hello world."`
          muted earth tones with a cold blue-grey palette
 [Audio]: Rope creaking, water lapping, distant gull cries, wind
 ```
+
+## Per-model prompting guides
+
+Read the guide for the provider the selector picked before writing the prompt:
+
+- Seedance 2.0: `prompting/seedance-prompting.md` (preferred premium default)
+- VEO 3.1: `prompting/veo-prompting.md`
+- Sora 2: `prompting/sora-prompting.md`
+- LTX-2: `prompting/ltx-prompting.md`
+- HunyuanVideo: `prompting/hunyuan-prompting.md`
+- Grok: `prompting/grok-prompting.md`
