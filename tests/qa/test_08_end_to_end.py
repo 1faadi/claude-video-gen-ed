@@ -572,6 +572,17 @@ try:
 except Exception as e:
     check("Render report validates against schema", False, str(e))
 
+# Render QA gate: compose cannot complete without a passing machine check.
+from tools.analysis.render_qa import RenderQA
+qa = RenderQA().execute({
+    "input_path": final_video,
+    "expected_duration_seconds": round(duration, 2),
+    "output_dir": str(Path(final_video).parent / "review" / "render_qa"),
+})
+check("render_qa gate passed", bool(qa.success and qa.data.get("passed")),
+      "; ".join(f["message"] for f in (qa.data or {}).get("findings", [])) if qa.success else qa.error)
+render_report["metadata"] = {"render_qa": qa.data["gate"] if qa.success else {"passed": False}}
+
 write_checkpoint(
     PIPELINE_DIR, PROJECT_ID, "compose", "completed",
     artifacts={"render_report": render_report},

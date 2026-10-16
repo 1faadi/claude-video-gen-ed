@@ -181,6 +181,7 @@ stages:
       - audio_mixer
       - video_trimmer
       - audio_enhance
+      - render_qa
     checkpoint_required: true
     human_approval_default: false
     review_focus:
@@ -190,6 +191,7 @@ stages:
     success_criteria:
       - Schema-valid render_report artifact
       - All output files exist and pass ffprobe validation
+      - "render_qa gate passed: render_report.metadata.render_qa.passed is true (or a waiver with reason) — lib/checkpoint.py refuses compose=completed otherwise"
 
   - name: publish
     skill: pipelines/podcast-repurpose/publish-director

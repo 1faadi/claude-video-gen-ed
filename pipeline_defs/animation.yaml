@@ -262,6 +262,7 @@ stages:
       - hyperframes_compose
       - audio_mixer
       - video_stitch
+      - render_qa
     checkpoint_required: true
     human_approval_default: false
     review_focus:
@@ -276,6 +277,7 @@ stages:
       - Schema-valid render_report artifact
       - Output file exists and passes ffprobe validation
       - self_review_completed is true with per-scene quality notes
+      - "render_qa gate passed: render_report.metadata.render_qa.passed is true (or a waiver with reason) — lib/checkpoint.py refuses compose=completed otherwise"
 
   - name: publish
     skill: pipelines/animation/publish-director

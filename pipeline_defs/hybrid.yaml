@@ -193,6 +193,7 @@ stages:
       - video_trimmer
       - color_grade
       - audio_enhance
+      - render_qa
     checkpoint_required: true
     human_approval_default: false
     review_focus:
@@ -204,6 +205,7 @@ stages:
     success_criteria:
       - Schema-valid render_report artifact
       - Output file exists and passes ffprobe validation
+      - "render_qa gate passed: render_report.metadata.render_qa.passed is true (or a waiver with reason) — lib/checkpoint.py refuses compose=completed otherwise"
 
   - name: publish
     skill: pipelines/hybrid/publish-director

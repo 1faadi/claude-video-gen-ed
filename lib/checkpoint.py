@@ -419,6 +419,35 @@ def _merge_decision_log(
         json.dump(existing, f, indent=2)
 
 
+
+def _enforce_render_qa_gate(stage: str, status: str, artifacts: dict[str, Any]) -> None:
+    """A ``compose`` checkpoint may only complete with a passing render_qa report.
+
+    The compose directors ask for a post-render self-review in prose; this is
+    the machine half. The agent runs ``tools/analysis/render_qa.py`` on the
+    rendered file and puts the returned ``gate`` block under
+    ``render_report.metadata.render_qa``. ``{"waived": true, "reason": "..."}``
+    is accepted so a user can knowingly ship a render the checks dislike.
+    ``awaiting_human`` / ``in_progress`` / ``failed`` are not gated.
+    """
+    if stage != "compose" or status != "completed":
+        return
+    report = artifacts.get("render_report")
+    qa = (report or {}).get("metadata", {}).get("render_qa") if isinstance(report, dict) else None
+    if isinstance(qa, dict):
+        if qa.get("passed") is True:
+            return
+        if qa.get("waived") is True and str(qa.get("reason") or "").strip():
+            return
+    raise CheckpointValidationError(
+        "RENDER QA GATE: stage 'compose' cannot be written completed without a "
+        "passing render_qa report. Run RenderQA().execute({'input_path': <final.mp4>, "
+        "'timestamps': <scene midpoints>, 'expected_duration_seconds': <planned>}) and "
+        "copy result.data['gate'] into render_report.metadata.render_qa. If the user "
+        "explicitly accepts the findings, record metadata.render_qa = "
+        "{'waived': True, 'reason': '<their words>'} instead."
+    )
+
 def write_checkpoint(
     pipeline_dir: Path,
     project_id: str,
@@ -500,6 +529,7 @@ def write_checkpoint(
         stage,
         status,
     )
+    _enforce_render_qa_gate(stage, status, artifacts)
 
     checkpoint = {
         "version": "1.0",
